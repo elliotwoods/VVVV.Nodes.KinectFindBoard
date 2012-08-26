@@ -1,0 +1,15 @@
+<!DOCTYPE PATCH  SYSTEM "http://vvvv.org/versions/vvvv45alpha28.dtd" >
+   <PATCH nodename="E:\project files\lumacoustics\kinect-depth.v4p" systemname="kinect-depth" filename="E:\project files\lumacoustics\kinect-depth.v4p">
+   <BOUNDS type="Window" left="9900" top="6000" width="9000" height="6000">
+   </BOUNDS>
+   <NODE systemname="Kinect (Devices Microsoft)" filename="%VVVV%\addonpack\lib\nodes\plugins\VVVV.Nodes.MSKinect.dll" nodename="Kinect (Devices Microsoft)" componentmode="Hidden" id="0">
+   <BOUNDS type="Node" left="1065" top="465" width="100" height="100">
+   </BOUNDS>
+   <PIN pinname="Motor Angle" slicecount="1" values="0.83">
+   </PIN>
+   </NODE>
+   <NODE systemname="Template (Enumerations Dynamic)" filename="%VVVV%\lib\nodes\plugins\TemplateEnumerations\TemplateEnumerations.csproj" nodename="Template (Enumerations Dynamic)" componentmode="Hidden" id="1">
+   <BOUNDS type="Node" left="1095" top="1200" width="100" height="100">
+   </BOUNDS>
+   </NODE>
+   </PATCH>

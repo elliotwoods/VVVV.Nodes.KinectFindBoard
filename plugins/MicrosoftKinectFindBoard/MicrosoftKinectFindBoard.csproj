@@ -1,0 +1,72 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <ProjectGuid>{6A0AFB1F-8219-4A08-85F7-B7F19B66AC16}</ProjectGuid>
+    <Configuration>Debug</Configuration>
+    <Platform>x86</Platform>
+    <OutputType>Library</OutputType>
+    <RootNamespace>VVVV.Nodes</RootNamespace>
+    <AssemblyName>MicrosoftKinectFindBoard</AssemblyName>
+    <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DebugSymbols>True</DebugSymbols>
+    <DebugType>Full</DebugType>
+    <Optimize>False</Optimize>
+    <CheckForOverflowUnderflow>True</CheckForOverflowUnderflow>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+    <ReferencePath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\</ReferencePath>
+    <ReferencePath>C:\vvvv\vvvv-sdk\vvvv45\bin\managed\</ReferencePath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Emgu.CV">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\addonpack\lib\nodes\plugins\Emgu.CV.dll</HintPath>
+    </Reference>
+    <Reference Include="Emgu.Util">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\addonpack\lib\nodes\plugins\Emgu.Util.dll</HintPath>
+    </Reference>
+    <Reference Include="Microsoft.Kinect">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\addonpack\lib\nodes\plugins\Microsoft.Kinect.dll</HintPath>
+    </Reference>
+    <Reference Include="SlimDX" />
+    <Reference Include="System" />
+    <Reference Include="System.ComponentModel.Composition.Codeplex">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\System.ComponentModel.Composition.Codeplex.dll</HintPath>
+    </Reference>
+    <Reference Include="System.Core" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="VVVV.Core">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\VVVV.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="VVVV.Hosting">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\VVVV.Hosting.dll</HintPath>
+    </Reference>
+    <Reference Include="VVVV.Nodes.MSKinect">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\addonpack\lib\nodes\plugins\VVVV.Nodes.MSKinect.dll</HintPath>
+    </Reference>
+    <Reference Include="VVVV.PluginInterfaces">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\VVVV.PluginInterfaces.dll</HintPath>
+    </Reference>
+    <Reference Include="VVVV.Utils">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\VVVV.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="VVVV.Utils3rdParty">
+      <HintPath>C:\vvvv\vvvv-sdk\vvvv45\lib\core\VVVV.Utils3rdParty.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="MicrosoftKinectFindBoardNode.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <WCFMetadata Include="Service References\" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="C:\vvvv\vvvv-sdk\vvvv45\addonpack\src\nodes\plugins\Image\OpenCV\VVVV.Nodes.OpenCV.csproj">
+      <Project>{E9A7FC26-34E0-4C1E-83D8-C01A169422B2}</Project>
+      <Name>VVVV.Nodes.OpenCV</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(MSBuildBinPath)\Microsoft.CSharp.Targets" />
+</Project>

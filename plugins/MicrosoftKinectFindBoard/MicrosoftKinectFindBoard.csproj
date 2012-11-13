@@ -22,10 +22,12 @@
     <OutputPath>c:\vvvv\vvvv-sdk\vvvv45\addonpack\lib\nodes\plugins\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="FindBoardInWorldNode.cs" />
     <Compile Include="KinectHighResRuntime.cs" />
     <Compile Include="FullHouse.cs" />
     <Compile Include="MicrosoftKinectFindBoardNode.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="SkeletonSplit.cs" />
     <Compile Include="World.cs" />
   </ItemGroup>
   <ItemGroup>

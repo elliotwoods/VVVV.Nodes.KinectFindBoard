@@ -40,11 +40,14 @@ namespace VVVV.MSKinect.Nodes
 		[Input("Enabled", IsSingle=true)]
 		private IDiffSpread<bool> FInEnabled;
 
-		[Output("Corners RGB")]
-		private ISpread<Vector2D> FOutCornersRGB;
+		[Output("Corners RGB Map")]
+		private ISpread<Vector2D> FOutCornersRGBMap;
+
+		[Output("Corners Depth Map")]
+		private ISpread<Vector2D> FOutCornersDepthMap;
 
 		[Output("Corners Depth")]
-		private ISpread<Vector2D> FOutCornersDepth;
+		private ISpread<Double> FOutCornersDepth;
 
 		[Output("Corners World")]
 		private ISpread<Vector3D> FOutCornersXYZ;
@@ -218,7 +221,7 @@ namespace VVVV.MSKinect.Nodes
 					//convert rgb to luminance
 					FImageRGB.SetPixels(FDataRGB);
 					FImageRGB.GetImage(TColorFormat.L8, FImageLuminance);
-
+					 
 					//find chessboard corners
 					var pointsInRGB = CameraCalibration.FindChessboardCorners(FImageLuminance.GetImage() as Image<Gray, byte>, new Size(FInBoardX[0], FInBoardY[0]), CALIB_CB_TYPE.ADAPTIVE_THRESH);
 
@@ -226,13 +229,14 @@ namespace VVVV.MSKinect.Nodes
 					if (pointsInRGB == null)
 						throw(new Exception("No chessboard found."));
 
-					FOutCornersRGB.SliceCount = pointsInRGB.Length;
+					FOutCornersRGBMap.SliceCount = pointsInRGB.Length;
+					FOutCornersDepthMap.SliceCount = pointsInRGB.Length;
 					FOutCornersDepth.SliceCount = pointsInRGB.Length;
 					FOutCornersXYZ.SliceCount = pointsInRGB.Length;
 
 					for(int i=0; i<pointsInRGB.Length; i++)
 					{
-						FOutCornersRGB[i] = new Vector2D((double) pointsInRGB[i].X, (double) pointsInRGB[i].Y);
+						FOutCornersRGBMap[i] = new Vector2D((double)pointsInRGB[i].X, (double)pointsInRGB[i].Y);
 
 						var xRGB = (int) pointsInRGB[i].X;
 						var yRGB = (int) pointsInRGB[i].Y;
@@ -242,7 +246,8 @@ namespace VVVV.MSKinect.Nodes
 						var xDepth = depthIndex % kinect.DepthStream.FrameWidth;
 						var yDepth = depthIndex / kinect.DepthStream.FrameWidth;
 
-						FOutCornersDepth[i] = new Vector2D((double) xDepth, (double) yDepth);
+						FOutCornersDepthMap[i] = new Vector2D((double) xDepth, (double) yDepth);
+						FOutCornersDepth[i] = (Double)FDataDepth[xDepth + yDepth * FDepthSize.Width];
 
 						var world = kinect.MapDepthToSkeletonPoint(FDepthFormat, xRGB, yRGB, FDataDepth[depthIndex]);
 
@@ -252,6 +257,7 @@ namespace VVVV.MSKinect.Nodes
 				}
 			}
 
+			#region oldcode
 			////if we've got matching depth and rgb frames then let's find some chessboards!
 			////if (true || this.rgbFrameAvailable == this.depthFrameAvailable)
 			//{
@@ -323,6 +329,7 @@ namespace VVVV.MSKinect.Nodes
 			//    }
 
 			// }
+			#endregion
 		}
 
 		private void invertLookup()

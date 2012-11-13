@@ -12,20 +12,30 @@ using System.Threading.Tasks;
 
 namespace VVVV.Nodes.MSKinect
 {
+	class FullHouseContext
+	{
+		public FullHouseNode FullHouseNode;
+
+		public FullHouseContext(FullHouseNode node)
+		{
+			this.FullHouseNode = node;
+		}
+	}
+
 	[PluginInfo(Name = "FullHouse", Category = "Kinect", Version = "Microsoft, Standalone", Author = "elliotwoods")]
-	public class FullHouseNode : IPluginEvaluate, IPluginDXTexture2
+	public class FullHouseNode : IPluginEvaluate, IPluginDXTexture2, IDisposable
 	{
 		[Input("Skeleton Smoothing", IsSingle = true)]
 		IDiffSpread<TransformSmoothParameters> FInSkeletonSmoothing;
 
+		[Input("Image Registration", IsSingle = true)]
+		IDiffSpread<bool> FInRegistration;
+
 		[Input("Enabled", IsSingle=true)]
 		IDiffSpread<bool> FInEnabled;
 
-		[Output("Sensor")]
-		ISpread<KinectSensor> FOutSensor;
-
-		[Output("Skeletons")]
-		ISpread<Skeleton> FOutSkeleton; 
+		[Output("Context")]
+		ISpread<FullHouseContext> FOutContext;
 
 		[Output("Frame Number")]
 		ISpread<int> FOutFrameNumber;
@@ -33,7 +43,10 @@ namespace VVVV.Nodes.MSKinect
 		[Output("Timestamp", DimensionNames=new string[]{"s"})]
 		ISpread<double> FOutTimestamp;
 
-		[Output("Status")]
+		[Output("Skeletons")]
+		Pin<Skeleton> FOutSkeleton; 
+
+		[Output("Status", Order=1000)]
 		ISpread<string> FOutStatus;
 
 		private IDXTextureOut FOutColor;
@@ -43,17 +56,28 @@ namespace VVVV.Nodes.MSKinect
 		private IDXTextureOut FOutWorld;
 		Dictionary<Device, Texture> FWorldTexture = new Dictionary<Device, Texture>();
 
-
-		private KinectSensor FSensor;
+		public KinectSensor FSensor;
 		
-		private short[] FDepthData;
-		private byte[] FColorData;
+		public short[] DepthData;
+		private byte[] FUnregisteredColorData;
+		public byte[] ColorData;
 		private Skeleton[] FSkeletonData;
+		private ColorImagePoint[] FRegistrationData;
 
 		private DepthImageFormat FDepthFormat;
 
 		private float[] FWorldData1, FWorldData2;
 		private bool FWorldDataPointer = false; // false = write2,read1
+		public float[] WorldData
+		{
+			get
+			{
+				if (FWorldDataPointer)
+					return FWorldData2;
+				else
+					return FWorldData1;
+			}
+		}
 
 		private long FTimestamp;
 		private int FFrameNumber;
@@ -62,13 +86,35 @@ namespace VVVV.Nodes.MSKinect
 		private bool FColorInvalidate = false;
 		private bool FDepthInvalidate = false;
 		private bool FSkeletonInvalidate = false;
-		private bool FWorldInvalidate = false;
+		private bool FWorldInInvalidate = false;
+		private bool FWorldOutInvalidate = false;
 
-		private Object FColorLock = new Object();
-		private Object FDepthLock = new Object();
+		public Object ColorLock = new Object();
+		public Object DepthLock = new Object();
 
 		private ReaderWriterLock FWorldLock1 = new ReaderWriterLock();
 		private ReaderWriterLock FWorldLock2 = new ReaderWriterLock();
+		public ReaderWriterLock FWorldLock
+		{
+			get
+			{
+				if (FWorldDataPointer)
+					return FWorldLock1;
+				else
+					return FWorldLock2;
+			}
+		}
+		Thread FWorldThread;
+		bool FWorldThreadRunning = true;
+
+		public event EventHandler Update;
+
+		public void OnUpdate()
+		{
+			if (Update == null)
+				return;
+			Update(this, EventArgs.Empty);
+		}
 
 		[ImportingConstructor()]
 		public FullHouseNode(IPluginHost host)
@@ -76,6 +122,8 @@ namespace VVVV.Nodes.MSKinect
 			host.CreateTextureOutput("Color", TSliceMode.Single, TPinVisibility.True, out this.FOutColor);
 			host.CreateTextureOutput("Depth", TSliceMode.Single, TPinVisibility.True, out this.FOutDepth);
 			host.CreateTextureOutput("World", TSliceMode.Single, TPinVisibility.True, out this.FOutWorld);
+			FWorldThread = new Thread(WorldThread);
+			FWorldThread.Start();
 		}
 
 		public void Evaluate(int SpreadMax)
@@ -114,7 +162,7 @@ namespace VVVV.Nodes.MSKinect
 					}
 				}
 
-				FOutSensor[0] = FSensor; 
+				FOutContext[0] = new FullHouseContext(this);
 			}
 
 			if (FInSkeletonSmoothing.IsChanged)
@@ -130,6 +178,16 @@ namespace VVVV.Nodes.MSKinect
 				FOutFrameNumber[0] = FFrameNumber;
 				FOutTimestamp[0] = ( (double) FTimestamp) / 1000.0;
 				FTimestampInvalidate = false;
+			}
+
+			if (FSkeletonInvalidate)
+			{
+				FOutSkeleton.SliceCount = 0;
+				foreach (var skeleton in FSkeletonData)
+				{
+					if (skeleton.TrackingId > 0)
+						FOutSkeleton.Add(skeleton);
+				}
 			}
 		}
 
@@ -150,18 +208,104 @@ namespace VVVV.Nodes.MSKinect
 			throw (new Exception("No Kinect sensor found."));
 		}
 
+		void ClearColorData()
+		{
+			//seperate function here to wrap lambda function, so can debug larger function easier
+			Parallel.For(0, ColorData.Length, i => ColorData[i] = 0);
+		}
+
+		void RemapColors()
+		{
+			var width = FSensor.ColorStream.FrameWidth;
+			var height = FSensor.ColorStream.FrameHeight;
+
+			//seperate function here to wrap lambda function, so can debug larger function easier
+			Parallel.For(0, width * height, i =>
+			{
+				var index = FRegistrationData[i].X + FRegistrationData[i].Y * width;
+
+				if (index < width * height)
+				{
+					ColorData[i * 4] = FUnregisteredColorData[index * 4];
+					ColorData[i * 4 + 1] = FUnregisteredColorData[index * 4 + 1];
+					ColorData[i * 4 + 2] = FUnregisteredColorData[index * 4 + 2];
+					ColorData[i * 4 + 3] = FUnregisteredColorData[index * 4 + 3];
+				}
+			});
+		}
+
 		void FSensor_AllFramesReady(object sender, AllFramesReadyEventArgs e)
 		{
+			//if we have listeners, then make all data anyway
+			bool DoAnyway = Update != null;
+
+			//cache a value across whole function
+			var UseRegistration = FInRegistration[0] || DoAnyway;
+
+			//depth
+			if (FOutDepth.IsConnected || FOutWorld.IsConnected || DoAnyway)
+			{
+				var depth = e.OpenDepthImageFrame();
+				if (depth != null)
+				{
+					lock (DepthLock)
+					{
+						if (DepthData == null || DepthData.Length != depth.PixelDataLength)
+							DepthData = new short[depth.PixelDataLength];
+
+						depth.CopyPixelDataTo(DepthData);
+						FDepthFormat = depth.Format;
+					}
+					depth.Dispose();
+					FDepthInvalidate = true;
+
+					if (FOutWorld.IsConnected)
+						FWorldInInvalidate = true;
+
+					if (UseRegistration)
+					{
+						if (FRegistrationData == null || DepthData.Length != FRegistrationData.Length)
+							FRegistrationData = new ColorImagePoint[DepthData.Length];
+
+						var depthFormat = FSensor.DepthStream.Format;
+						var colorFormat = FSensor.ColorStream.Format;
+						FSensor.MapDepthFrameToColorFrame(depthFormat, DepthData, colorFormat, FRegistrationData);
+					}
+				}
+			}
+
 			//color
+			if (FOutColor.IsConnected || DoAnyway)
 			{
 				var color = e.OpenColorImageFrame();
 				if (color != null)
 				{
-					lock (FColorLock)
+					if (UseRegistration)
 					{
-						if (FColorData == null || FColorData.Length != color.PixelDataLength)
-							FColorData = new byte[color.PixelDataLength];
-						color.CopyPixelDataTo(FColorData);
+						if (FUnregisteredColorData == null || FUnregisteredColorData.Length != color.PixelDataLength)
+							FUnregisteredColorData = new byte[color.PixelDataLength];
+						color.CopyPixelDataTo(FUnregisteredColorData);
+
+						lock (ColorLock)
+						{
+							if (ColorData == null || ColorData.Length != color.PixelDataLength)
+								ColorData = new byte[color.PixelDataLength];
+
+							//clear output
+							ClearColorData();
+
+							//remap colors
+							RemapColors();
+						}
+					}
+					else
+					{
+						lock (ColorLock)
+						{
+							if (ColorData == null || ColorData.Length != color.PixelDataLength)
+								ColorData = new byte[color.PixelDataLength];
+							color.CopyPixelDataTo(ColorData);
+						}
 					}
 
 					FTimestamp = color.Timestamp;
@@ -173,24 +317,8 @@ namespace VVVV.Nodes.MSKinect
 				}
 			}
 
-			//depth
-			{
-				var depth = e.OpenDepthImageFrame();
-				if (depth != null)
-				{
-					lock (FDepthLock)
-					{
-						if (FDepthData == null || FDepthData.Length != depth.PixelDataLength)
-							FDepthData = new short[depth.PixelDataLength];
-						depth.CopyPixelDataTo(FDepthData);
-						FDepthFormat = depth.Format;
-					}
-					depth.Dispose();
-					FDepthInvalidate = true;
-				}
-			}
-
 			//skeletons
+			if (FOutSkeleton.PluginIO.IsConnected || DoAnyway)
 			{
 				var skeletons = e.OpenSkeletonFrame();
 				if (skeletons != null)
@@ -202,8 +330,27 @@ namespace VVVV.Nodes.MSKinect
 					FSkeletonInvalidate = true;
 				}
 			}
+
+			OnUpdate();
 		}
 
+		private void WorldThread()
+		{
+			while (FWorldThreadRunning)
+			{
+				if (FWorldInInvalidate)
+				{
+					MakeWorld();
+					FWorldInInvalidate = false;
+				}
+				else
+				{
+					Thread.Sleep(1);
+				}
+			}
+		}
+
+		short[] WorldDepthCopy;
 		private unsafe void MakeWorld()
 		{
 			var writeBuffer = FWorldDataPointer ? FWorldData1 : FWorldData2;
@@ -211,7 +358,14 @@ namespace VVVV.Nodes.MSKinect
 			var width = FSensor.DepthStream.FrameWidth;
 			var height = FSensor.DepthStream.FrameHeight;
 
-			//writeLock.AcquireWriterLock(10);
+			lock (DepthLock)
+			{
+				if (WorldDepthCopy == null || WorldDepthCopy.Length != DepthData.Length)
+					WorldDepthCopy = new short[DepthData.Length];
+				Array.Copy(DepthData, WorldDepthCopy, DepthData.Length);
+			}
+
+			writeLock.AcquireWriterLock(10);
 
 			try
 			{
@@ -224,7 +378,7 @@ namespace VVVV.Nodes.MSKinect
 					writeBuffer = FWorldDataPointer ? FWorldData1 : FWorldData2;
 				}
 
-				fixed (short* depthFixed = FDepthData)
+				fixed (short* depthFixed = WorldDepthCopy)
 				{
 					fixed(float* worldFixed = writeBuffer)
 					{
@@ -232,18 +386,7 @@ namespace VVVV.Nodes.MSKinect
 						float* world = worldFixed;
 
 						for(int y = 0; y<height; y++)
-						{
-							/*
-							for (int x = 0; x < width; x++)
-							{
-								 var worldPoint = FSensor.MapDepthToSkeletonPoint(FDepthFormat, x, y, *depth++);
-								*world++ = 1.0f;
-								*world++ = worldPoint.X;
-								*world++ = worldPoint.Y;
-								*world++ = worldPoint.Z;
-							}
-							*/
-							
+						{							
 							Parallel.For(0, width, (x) =>
 							{
 								var worldPoint = FSensor.MapDepthToSkeletonPoint(FDepthFormat, x, y, depth[x]);
@@ -260,8 +403,8 @@ namespace VVVV.Nodes.MSKinect
 					}
 				}
 
-				FWorldInvalidate = true;
 				FWorldDataPointer = !FWorldDataPointer;
+				FWorldOutInvalidate = true;
 			}
 			catch
 			{
@@ -269,7 +412,7 @@ namespace VVVV.Nodes.MSKinect
 			}
 			finally
 			{
-				//writeLock.ReleaseWriterLock();
+				writeLock.ReleaseWriterLock();
 			}
 		}
 
@@ -322,6 +465,7 @@ namespace VVVV.Nodes.MSKinect
 			if (this.FSensor != null)
 			{
 				//color
+				if (FOutColor.IsConnected)
 				{
 					var width = this.FSensor.ColorStream.FrameWidth;
 					var height = this.FSensor.ColorStream.FrameHeight;
@@ -340,9 +484,9 @@ namespace VVVV.Nodes.MSKinect
 						var surface = texture.GetSurfaceLevel(0);
 						var rectangle = surface.LockRectangle(LockFlags.Discard);
 
-						lock (FColorLock)
+						lock (ColorLock)
 						{
-							rectangle.Data.WriteRange(FColorData);
+							rectangle.Data.WriteRange(ColorData);
 						}
 
 						surface.UnlockRectangle();
@@ -351,38 +495,8 @@ namespace VVVV.Nodes.MSKinect
 					}
 				}
 
-				//depth
-				{
-					var width = FSensor.DepthStream.FrameWidth;
-					var height = FSensor.DepthStream.FrameHeight;
-
-					//create if necessary
-					if (!FDepthTexture.ContainsKey(OnDevice))
-					{
-						var texture = new Texture(OnDevice, width, height, 1, Usage.None, Format.L16, (OnDevice is DeviceEx) ? Pool.Default : Pool.Managed);
-						FDepthTexture.Add(OnDevice, texture);
-					}
-
-					//fill
-					if (FDepthInvalidate)
-					{
-						var texture = FDepthTexture[OnDevice];
-						var surface = texture.GetSurfaceLevel(0);
-						var rectangle = surface.LockRectangle(LockFlags.Discard);
-
-						lock (FDepthLock)
-						{
-							rectangle.Data.WriteRange(FDepthData);
-						}
-
-						surface.UnlockRectangle();
-
-						FDepthInvalidate = false;
-						MakeWorld();
-					}
-				}
-
 				//world
+				if (FOutWorld.IsConnected)
 				{
 					var width = FSensor.DepthStream.FrameWidth;
 					var height = FSensor.DepthStream.FrameHeight;
@@ -395,7 +509,7 @@ namespace VVVV.Nodes.MSKinect
 					}
 
 					//fill
-					if (FWorldInvalidate)
+					if (FWorldOutInvalidate)
 					{
 						var texture = FWorldTexture[OnDevice];
 						var surface = texture.GetSurfaceLevel(0);
@@ -420,12 +534,58 @@ namespace VVVV.Nodes.MSKinect
 
 						surface.UnlockRectangle();
 
-						FWorldInvalidate = false;
+						FWorldOutInvalidate = false;
+					}
+				}
+
+				//depth
+				if (FOutDepth.IsConnected)
+				{
+					var width = FSensor.DepthStream.FrameWidth;
+					var height = FSensor.DepthStream.FrameHeight;
+
+					//create if necessary
+					if (!FDepthTexture.ContainsKey(OnDevice))
+					{
+						var texture = new Texture(OnDevice, width, height, 1, Usage.None, Format.L16, (OnDevice is DeviceEx) ? Pool.Default : Pool.Managed);
+						FDepthTexture.Add(OnDevice, texture);
+					}
+
+					//fill
+					if (FDepthInvalidate)
+					{
+						var texture = FDepthTexture[OnDevice];
+						var surface = texture.GetSurfaceLevel(0);
+						var rectangle = surface.LockRectangle(LockFlags.Discard);
+
+						lock (DepthLock)
+						{
+							rectangle.Data.WriteRange(DepthData);
+						}
+
+						surface.UnlockRectangle();
+
+						FDepthInvalidate = false;
 					}
 				}
 
 			}
 		}
 #endregion
+
+		public void Dispose()
+		{
+			if (FSensor != null)
+			{
+				if (FSensor.IsRunning)
+					FSensor.Stop();
+				FSensor.Dispose();
+			}
+			if (FWorldThread != null)
+			{
+				FWorldThreadRunning = false;
+				FWorldThread.Join();
+			}
+		}
 	}
 }
